@@ -48,7 +48,7 @@ target_link_libraries(zp_cpp
     PRIVATE glm::glm glfw Vulkan::Vulkan enet)
 
 install(TARGETS zp_cpp)
-install(DIRECTORY include DESTINATION include)
+install(DIRECTORY include/ DESTINATION include)
 
 # Testing
 option(BUILD_TESTS "Build tests" OFF)
