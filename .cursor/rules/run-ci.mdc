@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+After modifying the codebase, run `scripts/ci.sh` and `scripts/release.sh v0.0.1-test` till everything works correctly.

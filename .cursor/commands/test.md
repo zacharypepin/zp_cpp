@@ -1,0 +1,1 @@
+Run `scripts/ci.sh` and `scripts/release.sh v0.0.1-test` and if necessary, investigate results.

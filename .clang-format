@@ -1,0 +1,85 @@
+---
+# BasedOnStyle: LLVM
+---
+Language: Cpp
+
+# Indent
+NamespaceIndentation: All
+IndentCaseLabels: true
+# IndentAccessModifiers: true
+AccessModifierOffset: 0
+IndentWidth: 4
+
+# Pointers
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# Line Length
+ColumnLimit: 300
+
+# Empty lines
+KeepEmptyLinesAtTheStartOfBlocks: true
+MaxEmptyLinesToKeep: 1
+
+# Includes
+SortIncludes: false
+
+# Spaces
+SpacesInContainerLiterals: false
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+  AfterControlStatements: true
+
+# Align
+AlignAfterOpenBracket: BlockIndent
+AlignArrayOfStructures: Right
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: true
+  AlignCompound: true
+AlignConsecutiveBitFields: AcrossEmptyLinesAndComments
+AlignConsecutiveMacros: AcrossEmptyLinesAndComments
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: true
+  AlignCaseColons: false
+AlignEscapedNewlines: DontAlign
+AlignOperands: AlignAfterOperator
+
+# Short blocks
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+
+# Breaking
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakAfterReturnType: None
+AlwaysBreakBeforeMultilineStrings: false
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: true
+
+# Bin packing
+BinPackArguments: false
+BinPackParameters: false
+
+# Braces
+BreakBeforeBraces: Allman
+
+# Comments
+ReflowComments: false
+FixNamespaceComments: false
+
+# Penalties
+PenaltyBreakAssignment: 10000
+PenaltyExcessCharacter: 1000
+PenaltyBreakOpenParenthesis: 1
+PenaltyReturnTypeOnItsOwnLine: 100000000
+
+# Braced Init
+AllowAllArgumentsOnNextLine: false

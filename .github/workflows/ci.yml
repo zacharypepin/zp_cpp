@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          ninja-build \
+          libgtest-dev \
+          libssl-dev \
+          g++-14 \
+          libglm-dev \
+          libglfw3-dev \
+          libvulkan-dev \
+          libenet-dev
+    
+    - name: Install CMake 3.31+
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '3.31.0'
+    
+    - name: Set up C++ compiler
+      run: |
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+    
+    - name: Make scripts executable
+      run: chmod +x scripts/*.sh
+    
+    - name: Build debug
+      run: ./scripts/build-debug.sh
+    
+    - name: Test debug
+      run: ./scripts/test-debug.sh
