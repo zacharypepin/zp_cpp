@@ -1,98 +1,44 @@
 #include <gtest/gtest.h>
 #include "zp_cpp/hash.hpp"
-#include "zp_cpp/core.hpp"
 #include "zp_cpp/files.hpp"
-#include <cstring>
-#include <filesystem>
+#include "zp_cpp/buff.hpp"
 #include <chrono>
-#include <string>
+#include <filesystem>
+#include <optional>
+#include <string_view>
 #include <system_error>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include "../cmn.hpp"
 
-// =========================================================================================================================================
-// =========================================================================================================================================
-// HashFileContents: Validates file contents can be read and hashed correctly.
-// =========================================================================================================================================
-// =========================================================================================================================================
-TEST(FileHashIntegrationTest, HashFileContents)
+namespace
 {
-    const std::filesystem::path test_file = zp::test::make_temp_path("zp_cpp_hash_test", ".txt");
-    const char* content                   = "This is test content for hashing";
-    const size_t content_size             = std::strlen(content);
+    std::optional<zp::hash::hash256> read_hash(const std::filesystem::path& path)
+    {
+        zp::buff<2048> buffer;
+        zp::span<std::byte> file_data;
+        const auto result = zp::files::read_file(path, buffer.as_span(), &file_data);
+        if (result != zp::Result::ZC_SUCCESS)
+        {
+            return std::nullopt;
+        }
+        return zp::hash::hash_data(zp::span<const std::byte>{file_data.p, file_data.count});
+    }
 
-    zp::span<const std::byte> content_span{reinterpret_cast<const std::byte*>(content), content_size};
-    ASSERT_EQ(zp::files::write_file(test_file, content_span), zp::Result::ZC_SUCCESS);
-
-    zp::buff<1024> buffer;
-    zp::span<std::byte> read_span = buffer.as_span();
-    zp::span<std::byte> actual_data;
-    ASSERT_EQ(zp::files::read_file(test_file, read_span, &actual_data), zp::Result::ZC_SUCCESS);
-
-    zp::span<const std::byte> const_actual_data{actual_data.p, actual_data.count};
-    auto hash          = zp::hash::hash_data(const_actual_data);
-
-    auto expected_hash = zp::hash::hash_data(content_span);
-
-    EXPECT_TRUE(hash == expected_hash);
-
-    std::error_code ec;
-    std::filesystem::remove(test_file, ec);
+    zp::Result write_text(const std::filesystem::path& path, std::string_view text)
+    {
+        const zp::span<const std::byte> payload{reinterpret_cast<const std::byte*>(text.data()), text.size()};
+        return zp::files::write_file(path, payload);
+    }
 }
 
 // =========================================================================================================================================
 // =========================================================================================================================================
-// HashMultipleFiles: Validates files with same content produce identical hashes.
+// DirectoryWatcherMaintainsHashCache: Validates directory polling keeps a hash cache in sync with create/modify/destroy events.
 // =========================================================================================================================================
 // =========================================================================================================================================
-TEST(FileHashIntegrationTest, HashMultipleFiles)
-{
-    const std::filesystem::path file1 = zp::test::make_temp_path("zp_cpp_file1", ".txt");
-    const std::filesystem::path file2 = zp::test::make_temp_path("zp_cpp_file2", ".txt");
-    const std::filesystem::path file3 = zp::test::make_temp_path("zp_cpp_file3", ".txt");
-
-    zp::span<const std::byte> content1_span{reinterpret_cast<const std::byte*>("content1"), 8};
-    zp::span<const std::byte> content2_span{reinterpret_cast<const std::byte*>("content2"), 8};
-    zp::span<const std::byte> content3_span{reinterpret_cast<const std::byte*>("content1"), 8};
-
-    ASSERT_EQ(zp::files::write_file(file1, content1_span), zp::Result::ZC_SUCCESS);
-    ASSERT_EQ(zp::files::write_file(file2, content2_span), zp::Result::ZC_SUCCESS);
-    ASSERT_EQ(zp::files::write_file(file3, content3_span), zp::Result::ZC_SUCCESS);
-
-    zp::buff<1024> buffer;
-    zp::span<std::byte> read_span = buffer.as_span();
-    zp::span<std::byte> actual_data;
-
-    ASSERT_EQ(zp::files::read_file(file1, read_span, &actual_data), zp::Result::ZC_SUCCESS);
-    zp::span<const std::byte> const_data1{actual_data.p, actual_data.count};
-    auto hash1 = zp::hash::hash_data(const_data1);
-
-    ASSERT_EQ(zp::files::read_file(file2, read_span, &actual_data), zp::Result::ZC_SUCCESS);
-    zp::span<const std::byte> const_data2{actual_data.p, actual_data.count};
-    auto hash2 = zp::hash::hash_data(const_data2);
-
-    ASSERT_EQ(zp::files::read_file(file3, read_span, &actual_data), zp::Result::ZC_SUCCESS);
-    zp::span<const std::byte> const_data3{actual_data.p, actual_data.count};
-    auto hash3 = zp::hash::hash_data(const_data3);
-
-    EXPECT_TRUE(hash1 == hash3);
-    EXPECT_FALSE(hash1 == hash2);
-
-    std::error_code ec1;
-    std::filesystem::remove(file1, ec1);
-    std::error_code ec2;
-    std::filesystem::remove(file2, ec2);
-    std::error_code ec3;
-    std::filesystem::remove(file3, ec3);
-}
-
-// =========================================================================================================================================
-// =========================================================================================================================================
-// DirectoryPollingLifecycle: Validates dir_watcher detects create, modify, and destroy events.
-// =========================================================================================================================================
-// =========================================================================================================================================
-TEST(FileHashIntegrationTest, DirectoryPollingLifecycle)
+TEST(FileHashIntegrationTest, DirectoryWatcherMaintainsHashCache)
 {
     const std::filesystem::path watch_dir = zp::test::make_temp_path("zp_cpp_watch");
     ASSERT_TRUE(std::filesystem::create_directory(watch_dir));
@@ -100,45 +46,65 @@ TEST(FileHashIntegrationTest, DirectoryPollingLifecycle)
     std::vector<std::filesystem::path> created;
     std::vector<std::filesystem::path> modified;
     std::vector<std::filesystem::path> destroyed;
+    std::unordered_map<std::filesystem::path, zp::hash::hash256> cache;
 
     zp::files::dir_watcher watcher;
-    watcher.config.dir               = watch_dir;
-    watcher.config.on_file_created   = [&](const std::filesystem::path& path) { created.push_back(path); };
-    watcher.config.on_file_modified  = [&](const std::filesystem::path& path) { modified.push_back(path); };
-    watcher.config.on_file_destroyed = [&](const std::filesystem::path& path) { destroyed.push_back(path); };
+    watcher.config.dir             = watch_dir;
 
-    // Initial poll should observe nothing.
+    watcher.config.on_file_created = [&](const std::filesystem::path& path)
+    {
+        created.push_back(path);
+        if (auto hash = read_hash(path))
+        {
+            cache[path] = *hash;
+        }
+    };
+
+    watcher.config.on_file_modified = [&](const std::filesystem::path& path)
+    {
+        modified.push_back(path);
+        if (auto hash = read_hash(path))
+        {
+            cache[path] = *hash;
+        }
+    };
+
+    watcher.config.on_file_destroyed = [&](const std::filesystem::path& path)
+    {
+        destroyed.push_back(path);
+        cache.erase(path);
+    };
+
     zp::files::poll_dir(&watcher);
     EXPECT_TRUE(created.empty());
     EXPECT_TRUE(modified.empty());
     EXPECT_TRUE(destroyed.empty());
+    EXPECT_TRUE(cache.empty());
 
-    const std::filesystem::path file_path = watch_dir / "tracked.txt";
-    const char* contents                  = "initial";
-    zp::span<const std::byte> initial_span{reinterpret_cast<const std::byte*>(contents), std::strlen(contents)};
-    ASSERT_EQ(zp::files::write_file(file_path, initial_span), zp::Result::ZC_SUCCESS);
+    const std::filesystem::path tracked_file = watch_dir / "tracked.txt";
+    ASSERT_EQ(write_text(tracked_file, "initial"), zp::Result::ZC_SUCCESS);
 
     zp::files::poll_dir(&watcher);
-    ASSERT_EQ(created.size(), 1);
-    EXPECT_EQ(created.front(), file_path);
-    EXPECT_TRUE(modified.empty());
-    EXPECT_TRUE(destroyed.empty());
+    ASSERT_EQ(created.size(), 1u);
+    EXPECT_EQ(created.front(), tracked_file);
+    ASSERT_TRUE(cache.contains(tracked_file));
+    const auto initial_hash = cache.at(tracked_file);
 
-    // Modify the file and ensure the watcher reports a modification.
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    const char* updated_contents = "updated";
-    zp::span<const std::byte> updated_span{reinterpret_cast<const std::byte*>(updated_contents), std::strlen(updated_contents)};
-    ASSERT_EQ(zp::files::write_file(file_path, updated_span), zp::Result::ZC_SUCCESS);
+    ASSERT_EQ(write_text(tracked_file, "initial with more data"), zp::Result::ZC_SUCCESS);
 
     zp::files::poll_dir(&watcher);
-    ASSERT_EQ(modified.size(), 1);
-    EXPECT_EQ(modified.front(), file_path);
-    EXPECT_TRUE(destroyed.empty());
+    ASSERT_EQ(modified.size(), 1u);
+    EXPECT_EQ(modified.front(), tracked_file);
+    ASSERT_TRUE(cache.contains(tracked_file));
+    EXPECT_TRUE(cache.at(tracked_file) != initial_hash);
 
-    ASSERT_TRUE(std::filesystem::remove(file_path));
+    ASSERT_TRUE(std::filesystem::remove(tracked_file));
+
     zp::files::poll_dir(&watcher);
-    ASSERT_EQ(destroyed.size(), 1);
-    EXPECT_EQ(destroyed.front(), file_path);
+    ASSERT_EQ(destroyed.size(), 1u);
+    EXPECT_EQ(destroyed.front(), tracked_file);
+    EXPECT_FALSE(cache.contains(tracked_file));
 
     std::error_code cleanup_ec;
     std::filesystem::remove_all(watch_dir, cleanup_ec);

@@ -1,71 +1,67 @@
 #include <gtest/gtest.h>
 #include "zp_cpp/hash.hpp"
-#include "zp_cpp/core.hpp"
+#include "zp_cpp/files.hpp"
 #include "zp_cpp/buff.hpp"
-#include <cstring>
+#include <chrono>
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <thread>
 #include <unordered_map>
+#include "../cmn.hpp"
 
 // =========================================================================================================================================
 // =========================================================================================================================================
-// SpanToHash: Validates span can be hashed and produces correct SHA-256 output length.
+// HashCacheUpdatesOnFileChange: Validates hash caching over file contents reacts to real file modifications.
 // =========================================================================================================================================
 // =========================================================================================================================================
-TEST(HashIntegrationTest, SpanToHash)
+TEST(HashIntegrationTest, HashCacheUpdatesOnFileChange)
 {
-    const char* data = "test";
-    std::byte bytes[4];
-    std::memcpy(bytes, data, 4);
+    const std::filesystem::path file_path = zp::test::make_temp_path("zp_cpp_hash_cache", ".txt");
 
-    zp::span<const std::byte> span{bytes, 4};
-    auto hash = zp::hash::hash_data(span);
-
-    EXPECT_EQ(zp::hash::to_str(hash).length(), 64);
-}
-
-// =========================================================================================================================================
-// =========================================================================================================================================
-// BufferAndHashWorkflow: Validates buffer allocation combined with span hashing workflow.
-// =========================================================================================================================================
-// =========================================================================================================================================
-TEST(HashIntegrationTest, BufferAndHashWorkflow)
-{
-    zp::buff<1024> buffer;
-    zp::span<std::byte> span1, span2;
-
-    buffer.bump(100, &span1);
-    buffer.bump(50, &span2);
-
-    for (size_t i = 0; i < span1.count; ++i)
+    const auto write_contents             = [&](std::string_view contents)
     {
-        span1.p[i] = std::byte{static_cast<uint8_t>(i % 256)};
-    }
+        const zp::span<const std::byte> data{reinterpret_cast<const std::byte*>(contents.data()), contents.size()};
+        return zp::files::write_file(file_path, data);
+    };
 
-    zp::span<const std::byte> const_span1{span1.p, span1.count};
-    auto hash            = zp::hash::hash_data(const_span1);
-    std::string hash_str = zp::hash::to_str(hash);
+    ASSERT_EQ(write_contents("alpha"), zp::Result::ZC_SUCCESS);
 
-    EXPECT_EQ(hash_str.length(), 64);
-}
+    std::unordered_map<std::filesystem::path, zp::hash::hash256> cache;
+    zp::buff<2048> scratch;
 
-// =========================================================================================================================================
-// =========================================================================================================================================
-// HashInUnorderedMap: Validates hash256 can be used as key in std::unordered_map.
-// =========================================================================================================================================
-// =========================================================================================================================================
-TEST(HashIntegrationTest, HashInUnorderedMap)
-{
-    std::unordered_map<zp::hash::hash256, std::string> hash_map;
+    const auto load_hash = [&]()
+    {
+        zp::span<std::byte> file_data;
+        const auto result = zp::files::read_file(file_path, scratch.as_span(), &file_data);
+        EXPECT_EQ(result, zp::Result::ZC_SUCCESS);
+        if (result != zp::Result::ZC_SUCCESS)
+        {
+            return zp::hash::hash256{};
+        }
+        return zp::hash::hash_data(zp::span<const std::byte>{file_data.p, file_data.count});
+    };
 
-    auto hash1      = zp::hash::hash_data("key1", 4);
-    auto hash2      = zp::hash::hash_data("key2", 4);
-    auto hash3      = zp::hash::hash_data("key3", 4);
+    const auto first_hash = load_hash();
+    cache[file_path]      = first_hash;
 
-    hash_map[hash1] = "value1";
-    hash_map[hash2] = "value2";
-    hash_map[hash3] = "value3";
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    ASSERT_EQ(write_contents("alpha beta gamma"), zp::Result::ZC_SUCCESS);
 
-    EXPECT_EQ(hash_map.size(), 3);
-    EXPECT_EQ(hash_map[hash1], "value1");
-    EXPECT_EQ(hash_map[hash2], "value2");
-    EXPECT_EQ(hash_map[hash3], "value3");
+    const auto second_hash = load_hash();
+    EXPECT_TRUE(first_hash != second_hash);
+
+    cache[file_path] = second_hash;
+    EXPECT_EQ(cache.size(), 1u);
+    EXPECT_TRUE(cache.at(file_path) == second_hash);
+
+    zp::buff<2048> verify_buffer;
+    zp::span<std::byte> verify_span;
+    ASSERT_EQ(zp::files::read_file(file_path, verify_buffer.as_span(), &verify_span), zp::Result::ZC_SUCCESS);
+    const auto verify_hash = zp::hash::hash_data(zp::span<const std::byte>{verify_span.p, verify_span.count});
+    EXPECT_TRUE(verify_hash == second_hash);
+
+    std::error_code ec;
+    std::filesystem::remove(file_path, ec);
 }

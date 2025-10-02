@@ -1,62 +1,77 @@
 #include <gtest/gtest.h>
 #include "zp_cpp/core.hpp"
 #include "zp_cpp/buff.hpp"
+#include "zp_cpp/files.hpp"
+#include "zp_cpp/hash.hpp"
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <system_error>
+#include "../cmn.hpp"
 
-// =========================================================================================================================================
-// =========================================================================================================================================
-// ComplexDataManipulation: Validates complex workflow using buffer, span copy, and receive operations.
-// =========================================================================================================================================
-// =========================================================================================================================================
-TEST(BufferSpanIntegrationTest, ComplexDataManipulation)
+namespace
 {
-    zp::buff<1024> buffer;
-    zp::span<std::byte> span1, span2, span3;
-
-    buffer.bump(100, &span1);
-    buffer.bump(200, &span2);
-    buffer.bump(50, &span3);
-
-    for (size_t i = 0; i < span1.count; ++i)
+    struct PacketHeader
     {
-        span1.p[i] = std::byte{static_cast<uint8_t>(i)};
-    }
-
-    uint8_t temp[100];
-    zp::span<std::byte> temp_span{reinterpret_cast<std::byte*>(temp), 100};
-    EXPECT_EQ(span1.cpy(0, 100, temp), zp::Result::ZC_SUCCESS);
-
-    EXPECT_EQ(span2.rcv(50, 100, temp), zp::Result::ZC_SUCCESS);
-
-    for (size_t i = 0; i < 100; ++i)
-    {
-        EXPECT_EQ(span2.p[50 + i], span1.p[i]);
-    }
+        std::uint16_t magic;
+        std::uint16_t version;
+        std::uint32_t payload_size;
+    };
 }
 
 // =========================================================================================================================================
 // =========================================================================================================================================
-// SpanSlicing: Validates creating nested subspans through multiple split() calls.
+// PacketRoundTripViaFileIO: Validates arena allocations compose a packet that can be written, reloaded, and hashed consistently.
 // =========================================================================================================================================
 // =========================================================================================================================================
-TEST(BufferSpanIntegrationTest, SpanSlicing)
+TEST(BufferSpanIntegrationTest, PacketRoundTripViaFileIO)
 {
-    int data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-    zp::span<int> full_span{data, 10};
+    constexpr std::size_t payload_size = 6u;
+    constexpr PacketHeader header{0xCAFEu, 0x0002u, static_cast<std::uint32_t>(payload_size)};
+    constexpr std::array<unsigned char, payload_size> payload = {'s', 'y', 'n', 'c', 'e', 'd'};
 
-    zp::span<int> first, second, third, fourth;
+    zp::buff<256> arena;
+    zp::span<std::byte> header_span;
+    zp::span<std::byte> payload_span;
 
-    // Split at position 3: [0,1,2] and [3,4,5,6,7,8,9]
-    EXPECT_EQ(full_span.split(3, &first, &second), zp::Result::ZC_SUCCESS);
-    EXPECT_EQ(first.p, &data[0]);
-    EXPECT_EQ(first.count, 3);
-    EXPECT_EQ(second.p, &data[3]);
-    EXPECT_EQ(second.count, 7);
+    ASSERT_EQ(arena.bump(sizeof(PacketHeader), &header_span), zp::Result::ZC_SUCCESS);
+    ASSERT_EQ(arena.bump(payload.size(), &payload_span), zp::Result::ZC_SUCCESS);
 
-    // Split second part at position 2: [3,4] and [5,6,7,8,9]
-    EXPECT_EQ(second.split(2, &third, &fourth), zp::Result::ZC_SUCCESS);
-    EXPECT_EQ(third.p, &data[3]);
-    EXPECT_EQ(third.count, 2);
-    EXPECT_EQ(fourth.p, &data[5]);
-    EXPECT_EQ(fourth.count, 5);
-    EXPECT_EQ(fourth.p[0], 5);
+    ASSERT_EQ(header_span.rcv(0, sizeof(PacketHeader), &header), zp::Result::ZC_SUCCESS);
+    ASSERT_EQ(payload_span.rcv(0, payload.size(), payload.data()), zp::Result::ZC_SUCCESS);
+
+    const size_t packet_size = header_span.count + payload_span.count;
+    const zp::span<const std::byte> packet_bytes{header_span.p, packet_size};
+    const auto expected_hash                = zp::hash::hash_data(packet_bytes);
+
+    const std::filesystem::path packet_path = zp::test::make_temp_path("zp_cpp_packet", ".bin");
+    ASSERT_EQ(zp::files::write_file(packet_path, packet_bytes), zp::Result::ZC_SUCCESS);
+
+    zp::buff<256> read_arena;
+    zp::span<std::byte> packet_on_disk;
+    ASSERT_EQ(zp::files::read_file(packet_path, read_arena.as_span(), &packet_on_disk), zp::Result::ZC_SUCCESS);
+    EXPECT_EQ(packet_on_disk.count, packet_size);
+
+    zp::span<std::byte> read_header;
+    zp::span<std::byte> read_payload;
+    ASSERT_EQ(packet_on_disk.split(sizeof(PacketHeader), &read_header, &read_payload), zp::Result::ZC_SUCCESS);
+    ASSERT_EQ(read_payload.count, payload.size());
+
+    PacketHeader roundtrip_header{};
+    ASSERT_EQ(read_header.cpy(0, sizeof(PacketHeader), &roundtrip_header), zp::Result::ZC_SUCCESS);
+    EXPECT_EQ(roundtrip_header.magic, header.magic);
+    EXPECT_EQ(roundtrip_header.version, header.version);
+    EXPECT_EQ(roundtrip_header.payload_size, header.payload_size);
+
+    std::array<unsigned char, payload_size> roundtrip_payload{};
+    ASSERT_EQ(read_payload.cpy(0, read_payload.count, roundtrip_payload.data()), zp::Result::ZC_SUCCESS);
+    EXPECT_EQ(roundtrip_payload, payload);
+
+    const auto roundtrip_hash = zp::hash::hash_data(zp::span<const std::byte>{packet_on_disk.p, packet_on_disk.count});
+    EXPECT_TRUE(roundtrip_hash == expected_hash);
+
+    std::error_code ec;
+    std::filesystem::remove(packet_path, ec);
 }

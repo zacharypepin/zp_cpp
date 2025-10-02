@@ -6,19 +6,26 @@
 
 // =========================================================================================================================================
 // =========================================================================================================================================
-// InterpolationWithRealTime: Validates calc_interp() with real system time produces valid interpolation values.
+// InterpolationProgressesAndWraps: Validates calc_interp() tracks progress and wraps after exceeding duration.
 // =========================================================================================================================================
 // =========================================================================================================================================
-TEST(TimeIntegrationTest, InterpolationWithRealTime)
+TEST(TimeIntegrationTest, InterpolationProgressesAndWraps)
 {
-    auto start    = zp::now();
-    auto duration = 100000000ULL;
+    const zp::ens start    = zp::now();
+    const zp::ens duration = 50'000'000ULL; // 50 ms
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const zp::ens mid        = zp::now();
+    const float first_interp = zp::calc_interp(start, mid, duration);
+    EXPECT_GT(first_interp, 0.0f);
+    EXPECT_LT(first_interp, 1.0f);
 
-    auto current = zp::now();
-    float interp = zp::calc_interp(start, current, duration);
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    const zp::ens later        = zp::now();
+    const float wrapped_interp = zp::calc_interp(start, later, duration);
 
-    EXPECT_GE(interp, 0.0f);
-    EXPECT_LE(interp, 1.0f);
+    EXPECT_GT(later - start, duration);
+    EXPECT_GE(wrapped_interp, 0.0f);
+    EXPECT_LT(wrapped_interp, 1.0f);
+    EXPECT_LT(wrapped_interp, first_interp);
 }
