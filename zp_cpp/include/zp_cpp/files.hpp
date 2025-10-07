@@ -27,8 +27,25 @@ namespace zp::files
         State state;
     };
 
+    struct file_watcher_t
+    {
+        struct Config
+        {
+            std::filesystem::path path;
+        };
+        Config config;
+
+        struct State
+        {
+            std::filesystem::file_time_type last_modified;
+        };
+        State state;
+    };
+
     Result read_file(const std::filesystem::path& path, span<std::byte> buffer, span<std::byte>* p_out);
     Result write_file(const std::filesystem::path& path, span<const std::byte> data);
 
     void poll_dir(dir_watcher* p_dir_watcher);
+
+    bool has_changed(file_watcher_t* p_file_watcher);
 };

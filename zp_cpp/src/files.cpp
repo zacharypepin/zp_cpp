@@ -131,3 +131,19 @@ void zp::files::poll_dir(dir_watcher* p_dir_watcher)
         }
     }
 }
+
+// =========================================================================================================================================
+// =========================================================================================================================================
+// has_changed: Checks if the file has changed since the last poll.
+// =========================================================================================================================================
+// =========================================================================================================================================
+bool zp::files::has_changed(file_watcher_t* p_file_watcher)
+{
+    const std::filesystem::file_time_type& last_modified = std::filesystem::last_write_time(p_file_watcher->config.path);
+    if (p_file_watcher->state.last_modified != last_modified)
+    {
+        p_file_watcher->state.last_modified = last_modified;
+        return true;
+    }
+    return false;
+}

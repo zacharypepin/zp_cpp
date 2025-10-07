@@ -157,3 +157,42 @@ TEST(FilesTest, PollDirLifecycle)
     std::filesystem::remove_all(watch_dir, ec);
     EXPECT_FALSE(ec);
 }
+
+// =========================================================================================================================================
+// =========================================================================================================================================
+// HasChangedDetectsFileUpdates: Validates has_changed() tracks initial state and subsequent modifications precisely.
+// =========================================================================================================================================
+// =========================================================================================================================================
+TEST(FilesTest, HasChangedDetectsFileUpdates)
+{
+    const std::filesystem::path file_path = zp::test::make_temp_path("zp_cpp_file_watcher", ".txt");
+
+    {
+        std::ofstream ofs(file_path, std::ios::binary);
+        ASSERT_TRUE(ofs.is_open());
+        ofs << "initial";
+    }
+
+    zp::files::file_watcher_t watcher;
+    watcher.config.path = file_path;
+
+    // First poll should detect that the watcher has no prior timestamp recorded.
+    EXPECT_TRUE(zp::files::has_changed(&watcher));
+
+    // Without any modifications the subsequent poll must not report a change.
+    EXPECT_FALSE(zp::files::has_changed(&watcher));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    {
+        std::ofstream ofs(file_path, std::ios::app | std::ios::binary);
+        ASSERT_TRUE(ofs.is_open());
+        ofs << "update";
+    }
+
+    // File modification should be detected, with the watcher state updated accordingly.
+    EXPECT_TRUE(zp::files::has_changed(&watcher));
+    EXPECT_FALSE(zp::files::has_changed(&watcher));
+
+    std::error_code ec;
+    std::filesystem::remove(file_path, ec);
+}
