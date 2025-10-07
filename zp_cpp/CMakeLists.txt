@@ -13,6 +13,7 @@ add_library(zp_cpp STATIC
     src/cli.cpp
     src/files.cpp
     src/hash.cpp
+    src/log.cpp
     src/time.cpp
     src/uuid.cpp
     src/math.cpp
@@ -138,6 +139,10 @@ if(BUILD_TESTS)
     add_executable(unit_gpu_util_test tests/unit/gpu_util.t.cpp)
     target_link_libraries(unit_gpu_util_test PRIVATE zp_cpp GTest::gtest GTest::gtest_main)
     gtest_discover_tests(unit_gpu_util_test)
+
+    add_executable(unit_log_test tests/unit/log.t.cpp)
+    target_link_libraries(unit_log_test PRIVATE zp_cpp GTest::gtest GTest::gtest_main)
+    gtest_discover_tests(unit_log_test)
 
     # Integration tests
     add_executable(integration_hash_test tests/integration/hash_integration.t.cpp)
