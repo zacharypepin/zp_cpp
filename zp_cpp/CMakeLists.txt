@@ -49,6 +49,8 @@ target_link_libraries(zp_cpp
     PUBLIC crypto
     PRIVATE glm::glm glfw Vulkan::Vulkan enet)
 
+set_property(TARGET zp_cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
+
 install(TARGETS zp_cpp)
 install(DIRECTORY include/ DESTINATION include)
 
